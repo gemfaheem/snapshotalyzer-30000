@@ -151,9 +151,9 @@ def create_snapshot(ctx, project, instance, force_snapshot):
 
                     print("Job done!")
 
-        else:
-            print("Snapshot creation declined. Use --force to create snapshot")
-            print("Job declined!")
+    else:
+        print("Snapshot creation declined. Use --force to create snapshot")
+        print("Job declined!")
     return
 
 
