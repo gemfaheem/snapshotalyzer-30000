@@ -7,14 +7,29 @@ def initiate_session(profile):
     ec2 = session.resource('ec2')
     return ec2
 
-def filter_instances(ec2, project):
+def filter_instances(ec2, project, instance):
     instances = []
 
+    instances = ec2.instances.all()
     if project:
         filters = [{'Name':'tag:Project','Values':[project]}]
-        instances = ec2.instances.filter(Filters=filters)
+        instances = instances.filter(Filters=filters)
+    if instance:
+        filters = [{'Name':'instance-id','Values':[instance]}]
+        instances = instances.filter(Filters=filters)
+
+    return instances
+
+def is_instance_running(i):
+    if i.state['Name'] == 'running':
+        return True
     else:
-        instances = ec2.instances.all()
+        return False
+
+def filter_running_instances(ec2, project, instanace):
+    instances = filter_instances(ec2, project, instanace)
+    filters = [{'Name':'instance-state-name','Values':['running']}]
+    instances = instances.filter(Filters=filters)
 
     return instances
 
@@ -42,12 +57,13 @@ def snapshots():
 
 @snapshots.command('list')
 @click.option('--project', default = None, help = 'Only snapshots for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Only list snapshots for instance provided')
 @click.option('--all', 'list_all',default = False, is_flag=True, help = 'List all snapshots for each volume and not just the most recent')
 @click.pass_context
-def list_snapshots(ctx, project, list_all):
+def list_snapshots(ctx, project, instance, list_all):
     "List EC2 volumes snapshots"
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
         for v in i.volumes.all():
@@ -71,12 +87,13 @@ def volumes():
 
 @volumes.command('list')
 @click.option('--project', default = None, help = 'Only volumes for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Only volumes for instance provided.')
 @click.pass_context
-def list_volumes(ctx, project):
+def list_volumes(ctx, project, instance):
     "List EC2 volumes"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
         for v in i.volumes.all():
@@ -96,16 +113,21 @@ def instances():
 
 @instances.command('snapshot', help="Create snapshots of all volumes")
 @click.option('--project', default = None, help = 'Only instances for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Only snapshots for instance provided')
 @click.option('--force', 'force_snapshot',default = False, is_flag=True, help = 'Create instance volume snapshot only when used with --force option')
 @click.pass_context
-def create_snapshot(ctx, project, force_snapshot):
+def create_snapshot(ctx, project, instance, force_snapshot):
     "Create snapshots for EC2 instances"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
+    #r_instances = filter_running_instances(ec2, project, instance)
 
-    for i in instances:
-        if force_snapshot:
+    if force_snapshot:
+        for i in instances:
+
+            isinstrunning = is_instance_running(i)
+
             print("Stopping {0} ...".format(i.id))
             i.stop()
             i.wait_until_stopped()
@@ -114,31 +136,36 @@ def create_snapshot(ctx, project, force_snapshot):
                 if has_pending_snapshot(v):
                     print("     Skipping {0}, snapshot already in progress".format(v.id))
                     continue
-                print("    Creating snapshot of {0}".format(v.id))
-                v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
+                try:
+                    print("    Creating snapshot of {0}".format(v.id))
+                    v.create_snapshot(Description="Created by SnapshotAlyzer 30000")
+                except  botocore.exceptions.ClientError as e:
+                    print("Problem occured while creating snapshot for volume {0}. ".format(v.id) + str(e))
+                    continue
 
-            print("Starting {0} ...".format(i.id))
+                if (isinstrunning):
+                    print("Starting {0} ...".format(i.id))
 
-            i.start()
-            i.wait_until_running()
+                    i.start()
+                    i.wait_until_running()
 
-            print("Job done!")
+                    print("Job done!")
 
         else:
-            print("Snapshot of instance {0} volume declined. Use --force to create snapshot".format(i.id))
+            print("Snapshot creation declined. Use --force to create snapshot")
             print("Job declined!")
-
     return
 
 
 @instances.command('list')
 @click.option('--project', default = None, help = 'Only instances for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Describes instance details')
 @click.pass_context
-def list_instances(ctx,project):
+def list_instances(ctx, project, instance):
     "List EC2 instances"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
         tags = {t['Key']: t['Value'] for t in i.tags or []}
@@ -153,13 +180,14 @@ def list_instances(ctx,project):
 
 @instances.command('stop')
 @click.option('--project', default = None, help = 'Only instances for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Stop only instance provided')
 @click.option('--force', 'force_stop',default = False, is_flag=True, help = 'Stop instances only when used with --force option')
 @click.pass_context
-def stop_instances(ctx, project, force_stop):
+def stop_instances(ctx, project, instance, force_stop):
     "Stop EC2 instances"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
 
@@ -178,13 +206,14 @@ def stop_instances(ctx, project, force_stop):
 
 @instances.command('start')
 @click.option('--project', default = None, help = 'Only instances for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Start only instance provided')
 @click.option('--force', 'force_start',default = False, is_flag=True, help = 'Start instances only when used with --force option')
 @click.pass_context
-def start_instances(ctx, project, force_start):
+def start_instances(ctx, project, instance, force_start):
     "Start EC2 instances"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
         try:
@@ -201,13 +230,14 @@ def start_instances(ctx, project, force_start):
 
 @instances.command('reboot')
 @click.option('--project', default = None, help = 'Only instances for project (tag Project:<name>)')
+@click.option('--instance', default = None, help = 'Reboot only for instance provided')
 @click.option('--force', 'force_reboot',default = False, is_flag=True, help = 'Reboot instances only when used with --force option')
 @click.pass_context
-def reboot_instances(ctx, project, force_reboot):
+def reboot_instances(ctx, project, instance, force_reboot):
     "Reboot EC2 instances"
 
     ec2 = initiate_session(ctx.obj['PROFILE'])
-    instances = filter_instances(ec2, project)
+    instances = filter_instances(ec2, project, instance)
 
     for i in instances:
         try:

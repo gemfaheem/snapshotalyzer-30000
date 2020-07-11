@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name = 'snapshotanalyzer_30000',
-    version = '0.2',
+    version = '0.3',
     author = 'Faheem Ahmed Khan',
     author_email = 'gemfaheem.khan@gmail.com',
     description = 'SnapshotAlyzer 30000 is a tool to manage AWS EC2 snapshots',
